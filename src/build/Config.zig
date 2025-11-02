@@ -9,6 +9,7 @@ build: *std.Build,
 version: []const u8,
 change_id: []const u8,
 commit_id: []const u8,
+description: []const u8,
 date: []const u8,
 
 pub fn init(b: *std.Build) Config {
@@ -33,6 +34,16 @@ pub fn init(b: *std.Build) Config {
         "change_id",
     }).stdout orelse "no_git_hash";
 
+    const description = build_pkg.run(b, .Pipe, .Ignore, &.{
+        "jj",
+        "log",
+        "--no-graph",
+        "-r",
+        "@",
+        "-T",
+        "description.first_line()",
+    }).stdout orelse "no desc";
+
     // TODO: make my own date formatter
     const date = build_pkg.run(b, .Pipe, .Ignore, &.{
         "date",
@@ -49,6 +60,7 @@ pub fn init(b: *std.Build) Config {
         .date = std.mem.trim(u8, date, "\n\t "),
         .commit_id = std.mem.trim(u8, commit_id, "\n\t "),
         .change_id = std.mem.trim(u8, change_id, "\n\t "),
+        .description = std.mem.trim(u8, description, "\n\t "),
     };
 }
 
@@ -58,5 +70,6 @@ pub fn createBuildOptionModule(self: Config) *std.Build.Module {
     config.addOption([]const u8, "commit_id", self.commit_id);
     config.addOption([]const u8, "change_id", self.change_id);
     config.addOption([]const u8, "version", self.version);
+    config.addOption([]const u8, "description", self.description);
     return config.createModule();
 }

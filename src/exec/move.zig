@@ -52,12 +52,24 @@ pub fn main() !void {
     }
 
     if (flags.help) {
-        util.log("{s}\n\n  Version:\n    {s} {s} {s} ({s})", .{ help_msg, build_option.version, build_option.change_id[0..8], build_option.commit_id[0..8], build_option.date });
+        util.log("{s}\n\n  Version:\n    {s} {s} {s} ({s}) '{s}'", .{
+            help_msg,
+            build_option.version,
+            build_option.change_id[0..8],
+            build_option.commit_id[0..8],
+            build_option.date,
+            build_option.description,
+        });
         std.process.exit(1);
     }
 
     if (flags.version) {
-        util.log("move {s} {s} {s} ({s})", .{ build_option.version, build_option.change_id[0..8], build_option.commit_id[0..8], build_option.date });
+        util.log("move version: ({s}) {s} {s} -- '{s}'", .{
+            build_option.date,
+            build_option.change_id[0..8],
+            build_option.commit_id[0..8],
+            build_option.description,
+        });
         return;
     }
 
