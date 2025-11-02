@@ -39,7 +39,7 @@ pub fn main() !void {
         return;
     }
     if (flag.version) {
-        util.log("move version: ({s}) {s} {s} -- '{s}'", .{
+        util.log("trash version: ({s}) {s} {s} -- '{s}'", .{
             build_option.date,
             build_option.change_id[0..8],
             build_option.commit_id[0..8],
