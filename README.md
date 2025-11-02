@@ -22,6 +22,8 @@ Usage: move src.. dest (--flags)
   When moveing files into a directory dest must have '/' at the end.
   When moving multiple files last path must be a directory and have a '/' at the end.
 
+  Move will not partially move src.. paths. Everyting must move or nothing will move.
+
   Clobber Style:
     (default)  error with warning
     -f --force    overwrite the file

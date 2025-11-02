@@ -4,7 +4,7 @@ const std = @import("std");
 pub const env = @import("./env.zig");
 pub const path = @import("./path.zig");
 
-pub const WarningList = @import("./WarningList.zig");
+pub const Reporter = @import("./Reporter.zig");
 pub const WorkDir = @import("./WorkDir.zig");
 pub const Args = @import("./Args.zig");
 

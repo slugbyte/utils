@@ -16,8 +16,8 @@ pub fn getBuf(buffer: []u8, key: []const u8) Allocator.Error!?[]u8 {
 pub fn getAlloc(allocator: Allocator, key: []const u8) Allocator.Error!?[]u8 {
     const result = std.process.getEnvVarOwned(allocator, key) catch |err| switch (err) {
         error.EnvironmentVariableNotFound => return null,
-        error.OutOfMemory => return null,
-        error.InvalidWtf8 => unreachable,
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidWtf8 => unreachable, // this module does not support windows
     };
 
     if (result.len == 0) return null;

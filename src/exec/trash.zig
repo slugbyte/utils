@@ -16,11 +16,11 @@ pub const help_msg =
 pub fn main() !void {
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const arena = arena_instance.allocator();
-    var warning_list: util.WarningList = .init(arena);
+    var reporter: util.Reporter = .init(arena);
 
-    if (util.env.exists("trash")) {
+    if (!util.env.exists("trash")) {
         util.log("ERROR: $trash must be set", .{});
-        warning_list.EXIT(1);
+        reporter.EXIT(1);
     }
 
     var flag = Flags{};
@@ -49,29 +49,37 @@ pub fn main() !void {
 
     if (args.positional.len == 0) {
         util.log("USAGE: trash [file]...", .{});
-        warning_list.EXIT(1);
+        reporter.EXIT(1);
     }
 
+    var success_count: usize = 0;
+    var fail_count: usize = 0;
     const wd = util.WorkDir.initCWD();
     for (args.positional) |path| {
-        const stat = wd.stat(path) catch |err| switch (err) {
-            else => warning_list.PANIC("unexpected error: {t}", .{err}),
-            error.FileNotFound => {
-                try warning_list.pushWarning("file not found: {s}", .{path});
-                continue;
-            },
+        const stat = try wd.stat(path) orelse {
+            fail_count +|= 1;
+            try reporter.pushWarning("file not found: {s}", .{path});
+            continue;
         };
         const trash_path = wd.trashKind(path, stat.kind) catch |err| switch (err) {
-            else => warning_list.PANIC("unexpected error: {t}", .{err}),
+            else => reporter.PANIC("unexpected error: {t}", .{err}),
             error.TrashFileKindNotSupported => {
-                try warning_list.pushWarning("trash does not support '{t}' files, unable to trash: {s}", .{ stat.kind, path });
+                fail_count +|= 1;
+                try reporter.pushWarning("trash does not support '{t}' files, unable to trash: {s}", .{ stat.kind, path });
                 continue;
             },
         };
+        success_count +|= 1;
         if (!flag.silent) util.log("{s} > $trash/{s}", .{ path, std.fs.path.basename(trash_path) });
     }
-    warning_list.report();
-    warning_list.EXIT(null);
+    if (fail_count > 0) {
+        try reporter.pushWarning("{d} files failed to trash. trashed {d}/{d} files.", .{ fail_count, success_count, success_count + fail_count });
+    }
+    reporter.report();
+    if (success_count > 1 and fail_count == 0) {
+        util.log("trashed {d}/{d} files", .{ success_count, success_count + fail_count });
+    }
+    reporter.EXIT(null);
 }
 
 const Flags = struct {

@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) void {
         if (b.args) |args| {
             run_cmd.addArgs(args);
         }
-        const run_step = b.step(b.fmt("run_{s}", .{exe_name}), b.fmt("Run {s} util.", .{exe_name}));
+        const run_step = b.step(b.fmt("{s}", .{exe_name}), b.fmt("Run {s} util.", .{exe_name}));
         run_step.dependOn(&run_cmd.step);
     }
 

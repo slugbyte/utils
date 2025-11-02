@@ -42,16 +42,18 @@ pub fn hashFilePathSha256(self: WorkDir, path: []const u8, digest_buffer: *[Sha2
     try self.hashFileSha256(file, digest_buffer);
 }
 
-pub fn stat(self: WorkDir, path: []const u8) !std.fs.File.Stat {
-    return self.dir.statFile(path);
+pub fn stat(self: WorkDir, path: []const u8) !?std.fs.File.Stat {
+    return self.dir.statFile(path) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => err,
+    };
 }
 
 pub fn exists(self: WorkDir, path: []const u8) !bool {
-    _ = self.stat(path) catch |err| switch (err) {
-        error.FileNotFound => return false,
-        else => return err,
-    };
-    return true;
+    if (try self.stat(path)) |_| {
+        return true;
+    }
+    return false;
 }
 
 pub fn trashKind(self: WorkDir, path: []const u8, kind: std.fs.File.Kind) ![]const u8 {
