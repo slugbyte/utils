@@ -13,29 +13,17 @@ pub fn init(dir: std.fs.Dir) WorkDir {
     };
 }
 
-pub fn initCWD() WorkDir {
+/// init with the current working directory
+pub fn cwd() WorkDir {
     return init(std.fs.cwd());
 }
 
-pub fn openFile(self: WorkDir, path: []const u8, open_flags: std.fs.File.OpenFlags) !std.fs.File {
-    return try self.dir.openFile(path, open_flags);
+/// move a path on the file system
+pub fn move(self: WorkDir, path_src: []const u8, path_dest: []const u8) !void {
+    try self.dir.rename(path_src, path_dest);
 }
 
-pub fn readFile(self: WorkDir, allocator: Allocator, path: []const u8) ![:0]const u8 {
-    const file = try self.openFile(path, .{});
-    // TODO: can i remove this buffer? it seems like it might not be needed when streamReamaing to Writer.Allocating...
-    var buffer: [4 * 1024]u8 = undefined;
-    var file_reader = file.reader(&buffer);
-    var allocating = std.Io.Writer.Allocating.init(allocator);
-    errdefer allocating.deinit();
-    _ = file_reader.interface.streamRemaining(&allocating.writer) catch return error.OutOfMemory;
-    return try allocating.toOwnedSliceSentinel(0);
-}
-
-pub fn move(self: WorkDir, path_source: []const u8, path_destination: []const u8) !void {
-    try self.dir.rename(path_source, path_destination);
-}
-
+/// stat a path and get null if FileNotFound
 pub fn stat(self: WorkDir, path: []const u8) !?std.fs.File.Stat {
     return self.dir.statFile(path) catch |err| switch (err) {
         error.FileNotFound => null,
@@ -43,6 +31,8 @@ pub fn stat(self: WorkDir, path: []const u8) !?std.fs.File.Stat {
     };
 }
 
+/// consiter using stat instead
+/// checks if a path exists
 pub fn exists(self: WorkDir, path: []const u8) !bool {
     if (try self.stat(path)) |_| {
         return true;
@@ -50,33 +40,13 @@ pub fn exists(self: WorkDir, path: []const u8) !bool {
     return false;
 }
 
-pub fn hashFileSha256(self: WorkDir, file: std.fs.File, digest_buffer: *[Sha256.digest_length]u8) !void {
-    _ = self;
-    const Hashing = std.Io.Writer.Hashing(Sha256);
-    var hashing_buffer: [1024]u8 = undefined;
-    var hashing = Hashing.initHasher(Sha256.init(.{}), &hashing_buffer);
-
-    var read_buffer: [1024]u8 = undefined;
-    var file_reader = file.readerStreaming(&read_buffer);
-    _ = try file_reader.interface.streamRemaining(&hashing.writer);
-    try hashing.writer.flush();
-
-    hashing.hasher.final(digest_buffer);
-}
-
-pub fn hashFilePathSha256(self: WorkDir, path: []const u8, digest_buffer: *[Sha256.digest_length]u8) !void {
-    const file = try self.openFile(path, .{});
-    defer file.close();
-
-    try self.hashFileSha256(file, digest_buffer);
-}
-
+/// move a file, directory or sym_link to the trash
 pub fn trashKind(self: WorkDir, path: []const u8, kind: std.fs.File.Kind) ![]const u8 {
     switch (kind) {
         .file => {
             const file_name = std.fs.path.basename(path);
             var digest: [Sha256.digest_length]u8 = undefined;
-            try self.hashFilePathSha256(path, &digest);
+            try self.hashFilepathSha256(path, &digest);
             const trash_path = try util.path.trashPathNameDigest(file_name, &digest);
             try self.move(path, trash_path);
             return trash_path;
@@ -96,31 +66,75 @@ pub fn trashKind(self: WorkDir, path: []const u8, kind: std.fs.File.Kind) ![]con
     }
 }
 
+/// move a file, directory or sym_link to the trash
 pub fn trashAutoKind(self: WorkDir, path: []const u8) ![]const u8 {
     const path_stat = try self.stat(path);
     return self.trashKind(path, path_stat.kind);
 }
 
-pub fn isPathEqual(self: WorkDir, path_a: []const u8, path_b: []const u8) !bool {
+/// check if two paths resolve to same location on the filestem
+pub fn isPathSameLocation(self: WorkDir, path_a: []const u8, path_b: []const u8) !bool {
     var buffer: [3 * std.fs.max_path_bytes]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const arena = fba.allocator();
 
-    const cwd = try self.dir.realpathAlloc(arena, ".");
+    const cwd_path = try self.dir.realpathAlloc(arena, ".");
     const resolve_a = blk_a: {
         if (std.fs.path.isAbsolute(path_a)) {
             break :blk_a try std.fs.path.resolve(arena, &.{path_a});
         } else {
-            break :blk_a try std.fs.path.resolve(arena, &.{ cwd, path_a });
+            break :blk_a try std.fs.path.resolve(arena, &.{ cwd_path, path_a });
         }
     };
     const resolve_b = blk_b: {
         if (std.fs.path.isAbsolute(path_b)) {
             break :blk_b try std.fs.path.resolve(arena, &.{path_b});
         } else {
-            break :blk_b try std.fs.path.resolve(arena, &.{ cwd, path_b });
+            break :blk_b try std.fs.path.resolve(arena, &.{ cwd_path, path_b });
         }
     };
 
     return std.mem.eql(u8, resolve_a, resolve_b);
+}
+
+pub fn filepathOpen(self: WorkDir, filepath: []const u8, open_flags: std.fs.File.OpenFlags) !std.fs.File {
+    return try self.dir.openFile(filepath, open_flags);
+}
+
+pub fn filepathRead(self: WorkDir, allocator: Allocator, filepath: []const u8) ![:0]const u8 {
+    const file = try self.filepathOpen(filepath, .{});
+    // TODO: can i remove this buffer? it seems like it might not be needed when streamReamaing to Writer.Allocating...
+    var buffer: [4 * 1024]u8 = undefined;
+    var file_reader = file.reader(&buffer);
+    var allocating = std.Io.Writer.Allocating.init(allocator);
+    errdefer allocating.deinit();
+    _ = file_reader.interface.streamRemaining(&allocating.writer) catch return error.OutOfMemory;
+    return try allocating.toOwnedSliceSentinel(0);
+}
+
+pub fn filepathParseZon(self: WorkDir, T: type, allocator: Allocator, filepath: []const u8, diagnostics: ?*std.zon.parse.Diagnostics, options: std.zon.parse.Options) !T {
+    const file_content = try self.filepathRead(allocator, filepath);
+    defer allocator.free(file_content);
+    return try std.zon.parse.fromSlice(T, allocator, file_content, diagnostics, options);
+}
+
+pub fn hashFileSha256(self: WorkDir, file: std.fs.File, digest_buffer: *[Sha256.digest_length]u8) !void {
+    _ = self;
+    const Hashing = std.Io.Writer.Hashing(Sha256);
+    var hashing_buffer: [1024]u8 = undefined;
+    var hashing = Hashing.initHasher(Sha256.init(.{}), &hashing_buffer);
+
+    var read_buffer: [1024]u8 = undefined;
+    var file_reader = file.readerStreaming(&read_buffer);
+    _ = try file_reader.interface.streamRemaining(&hashing.writer);
+    try hashing.writer.flush();
+
+    hashing.hasher.final(digest_buffer);
+}
+
+pub fn hashFilepathSha256(self: WorkDir, path: []const u8, digest_buffer: *[Sha256.digest_length]u8) !void {
+    const file = try self.filepathOpen(path, .{});
+    defer file.close();
+
+    try self.hashFileSha256(file, digest_buffer);
 }

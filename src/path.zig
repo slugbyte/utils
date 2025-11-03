@@ -1,9 +1,16 @@
 const std = @import("std");
 const util = @import("./root.zig");
 
+var buffer_home_dir: [std.fs.max_path_bytes]u8 = undefined;
 var buffer_trash_dir: [std.fs.max_path_bytes]u8 = undefined;
 var buffer_trash_path: [std.fs.max_path_bytes]u8 = undefined;
 var buffer_backup_path: [std.fs.max_path_bytes]u8 = undefined;
+
+pub fn homeDir() []const u8 {
+    return (util.env.getBuf(&buffer_home_dir, "HOME") catch {
+        @panic("env $HOME needs to exist");
+    }).?;
+}
 
 pub fn trashDir() ![]const u8 {
     return try util.env.getBuf(&buffer_trash_dir, "trash") orelse {

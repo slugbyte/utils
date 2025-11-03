@@ -7,7 +7,8 @@ const assert = std.debug.assert;
 const dirname = std.fs.path.dirname;
 const basename = std.fs.path.basename;
 const Allocator = std.mem.Allocator;
-const Args = util.Args;
+const ArgIterator = util.ArgIterator;
+const FlagParser = util.FlagParser;
 const Reporter = util.Reporter;
 const WorkDir = util.WorkDir;
 
@@ -102,7 +103,7 @@ pub fn main() !void {
                 dest_path = try std.fmt.allocPrintSentinel(arena, "{s}/{s}", .{ dirname(src_path) orelse "./", dest_path }, 0);
             }
 
-            if (try ctx.cwd.isPathEqual(src_path, dest_path)) {
+            if (try ctx.cwd.isPathSameLocation(src_path, dest_path)) {
                 try ctx.reporter.pushError("src and dest cannot be same location: ({s} == {s})", .{ src_path, dest_path });
             }
 
@@ -147,7 +148,7 @@ pub fn main() !void {
                     if (try ctx.cwd.stat(real_dest_path)) |real_dest_stat| {
                         _ = try checkDest(&ctx, real_dest_path, real_dest_stat, true);
                     }
-                    if (try ctx.cwd.isPathEqual(src_path, real_dest_path)) {
+                    if (try ctx.cwd.isPathSameLocation(src_path, real_dest_path)) {
                         try ctx.reporter.pushError("src and dest cannot be same location: ({s} == {s})", .{ src_path, real_dest_path });
                     }
                 }
@@ -179,7 +180,7 @@ pub fn checkDest(
     switch (dest_stat.kind) {
         .directory => {
             if (!dest_is_into_path) {
-                if (Args.endsWith(dest_path, "/")) {
+                if (util.endsWith(dest_path, "/")) {
                     if (ctx.flag_rename) {
                         try ctx.reporter.pushError("--remove cannot be used when moving into a directory", .{});
                     }
@@ -263,28 +264,29 @@ const Context = struct {
     reporter: Reporter,
     cwd: WorkDir,
 
-    args: Args.ArgIterator = undefined,
+    args: util.ArgIterator = undefined,
     positionals: [][:0]const u8 = undefined,
     flag_help: bool = false,
     flag_version: bool = false,
     flag_rename: bool = false,
     flag_silent: bool = false,
     flag_clobber_style: ClobberStyle = .NoClobber,
-    flag_parser: Args.FlagParser = .{
+    flag_parser: util.FlagParser = .{
         .parseFn = Context.implParseFn,
         .setArgIteratorFn = Context.implSetArgIterator,
         .setPositionalListFn = Context.implSetPositionalList,
+        .setProgramPathFn = FlagParser.noopSetProgramPath,
     },
 
     pub fn init(arena: Allocator) !Context {
         const reporter = Reporter.init(arena);
-        const work_dir = WorkDir.initCWD();
+        const work_dir = WorkDir.cwd();
         var result: Context = .{
             .arena = arena,
             .cwd = work_dir,
             .reporter = reporter,
         };
-        try Args.parse(arena, &result.flag_parser);
+        try result.flag_parser.parse(arena);
         return result;
     }
 
@@ -316,46 +318,46 @@ const Context = struct {
         }
     };
 
-    pub fn implSetPositionalList(flag_parser: *Args.FlagParser, positional: [][:0]const u8) bool {
+    pub fn implParseFn(flag_parser: *util.FlagParser, arg: [:0]const u8, _: *util.ArgIterator) FlagParser.Error!bool {
         var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        self.positionals = positional;
-        return true;
-    }
-
-    pub fn implSetArgIterator(flag_parser: *Args.FlagParser, iter: Args.ArgIterator) bool {
-        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        self.args = iter;
-        return true;
-    }
-
-    pub fn implParseFn(flag_parser: *Args.FlagParser, arg: [:0]const u8, _: *Args.ArgIterator) Args.Error!bool {
-        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        if (Args.eqlFlag(arg, "--trash", "-t")) {
+        if (util.eqlFlag(arg, "--trash", "-t")) {
             self.flag_clobber_style.prioritySet(.Trash);
             return true;
         }
-        if (Args.eqlFlag(arg, "--backup", "-b")) {
+        if (util.eqlFlag(arg, "--backup", "-b")) {
             self.flag_clobber_style.prioritySet(.Backup);
             return true;
         }
-        if (Args.eqlFlag(arg, "--rename", "-r")) {
+        if (util.eqlFlag(arg, "--rename", "-r")) {
             self.flag_rename = true;
             return true;
         }
-        if (Args.eql(arg, "--silent")) {
+        if (util.eql(arg, "--silent")) {
             self.flag_silent = true;
             return true;
         }
-        if (Args.eql(arg, "--version")) {
+        if (util.eql(arg, "--version")) {
             self.flag_version = true;
             return true;
         }
 
-        if (Args.eqlFlag(arg, "--help", "-h")) {
+        if (util.eqlFlag(arg, "--help", "-h")) {
             self.flag_help = true;
             return true;
         }
 
         return false;
+    }
+
+    pub fn implSetPositionalList(flag_parser: *util.FlagParser, positional: [][:0]const u8) bool {
+        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
+        self.positionals = positional;
+        return true;
+    }
+
+    pub fn implSetArgIterator(flag_parser: *util.FlagParser, iter: util.ArgIterator) bool {
+        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
+        self.args = iter;
+        return true;
     }
 };
