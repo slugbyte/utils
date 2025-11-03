@@ -2,7 +2,7 @@ const std = @import("std");
 const build_pkg = @import("./src/build/root.zig");
 
 pub fn build(b: *std.Build) void {
-    const config = build_pkg.Config.init(b);
+    const config = build_pkg.BuildConfig.init(b);
 
     const util_mod = b.addModule("util", .{
         .root_source_file = b.path("src/root.zig"),

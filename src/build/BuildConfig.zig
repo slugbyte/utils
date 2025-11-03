@@ -1,6 +1,7 @@
 const std = @import("std");
-const Config = @This();
 const build_pkg = @import("./root.zig");
+
+const BuildConfig = @This();
 
 target: std.Build.ResolvedTarget,
 optimize: std.builtin.OptimizeMode,
@@ -12,7 +13,7 @@ commit_id: []const u8,
 description: []const u8,
 date: []const u8,
 
-pub fn init(b: *std.Build) Config {
+pub fn init(b: *std.Build) BuildConfig {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     //
@@ -64,7 +65,7 @@ pub fn init(b: *std.Build) Config {
     };
 }
 
-pub fn createBuildOptionModule(self: Config) *std.Build.Module {
+pub fn createBuildOptionModule(self: BuildConfig) *std.Build.Module {
     var config = self.build.addOptions();
     config.addOption([]const u8, "date", self.date);
     config.addOption([]const u8, "commit_id", self.commit_id);

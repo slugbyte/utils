@@ -89,7 +89,7 @@ pub fn main() !void {
                 }
 
                 if (is_parrent) {
-                    const real_dest_path = try std.fmt.allocPrint(arena, "{s}{s}", .{ dest_path, basename(src_path) });
+                    const real_dest_path = try util.fmt(arena, "{s}{s}", .{ dest_path, basename(src_path) });
                     if (try ctx.cwd.stat(real_dest_path)) |real_dest_stat| {
                         _ = try checkDest(&ctx, real_dest_path, real_dest_stat, true);
                     }
@@ -100,7 +100,7 @@ pub fn main() !void {
                 if (std.mem.indexOf(u8, dest_path, "/")) |_| {
                     try ctx.reporter.pushError("--rename value may not inculed a '/'", .{});
                 }
-                dest_path = try std.fmt.allocPrintSentinel(arena, "{s}/{s}", .{ dirname(src_path) orelse "./", dest_path }, 0);
+                dest_path = try util.fmtZ(arena, "{s}/{s}", .{ dirname(src_path) orelse "./", dest_path });
             }
 
             if (try ctx.cwd.isPathSameLocation(src_path, dest_path)) {
@@ -143,7 +143,7 @@ pub fn main() !void {
 
             { // CHECK REAL DEST PATHS ARE VALID
                 for (src_path_list) |src_path| {
-                    const real_dest_path = try std.fmt.allocPrint(arena, "{s}{s}", .{ dest_path, basename(src_path) });
+                    const real_dest_path = try util.fmt(arena, "{s}{s}", .{ dest_path, basename(src_path) });
 
                     if (try ctx.cwd.stat(real_dest_path)) |real_dest_stat| {
                         _ = try checkDest(&ctx, real_dest_path, real_dest_stat, true);

@@ -1,5 +1,5 @@
 const std = @import("std");
-const util = @import("./root.zig");
+const util = @import("../root.zig");
 
 var buffer_home_dir: [std.fs.max_path_bytes]u8 = undefined;
 var buffer_trash_dir: [std.fs.max_path_bytes]u8 = undefined;

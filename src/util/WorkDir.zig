@@ -1,5 +1,5 @@
 const std = @import("std");
-const util = @import("./root.zig");
+const util = @import("../root.zig");
 
 const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;

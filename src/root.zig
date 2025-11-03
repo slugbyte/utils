@@ -1,17 +1,34 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 
-pub const env = @import("./env.zig");
-pub const path = @import("./path.zig");
-pub const ArgIterator = @import("./ArgIterator.zig");
-pub const FlagParser = @import("./FlagParser.zig");
-pub const Reporter = @import("./Reporter.zig");
-pub const WorkDir = @import("./WorkDir.zig");
+pub const env = @import("./util/env.zig");
+pub const path = @import("./util/path.zig");
+pub const ArgIterator = @import("./util/ArgIterator.zig");
+pub const FlagParser = @import("./util/FlagParser.zig");
+pub const Reporter = @import("./util/Reporter.zig");
+pub const WorkDir = @import("./util/WorkDir.zig");
 
-pub fn log(comptime fmt: []const u8, arg: anytype) void {
+pub const Allocator = std.mem.Allocator;
+pub const assert = std.debug.assert;
+
+pub fn log(comptime format: []const u8, arg: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buffer, fmt, arg) catch return;
+    const msg = std.fmt.bufPrint(&buffer, format, arg) catch return;
     std.debug.print("{s}\n", .{msg});
+}
+
+pub const fmt = std.fmt.allocPrint;
+pub fn fmtZ(allocator: Allocator, comptime format: []const u8, arg: anytype) ![:0]u8 {
+    return std.fmt.allocPrintSentinel(allocator, format, arg, 0);
+}
+pub const fmtBuf = std.fmt.bufPrint;
+pub const fmtBufZ = std.fmt.bufPrintZ;
+pub fn fmtBufTrunc(buffer: []u8, comptime format: []const u8, arg: anytype) []u8 {
+    var w: std.Io.Writer = .fixed(buffer);
+    w.print(format, arg) catch |err| switch (err) {
+        error.WriteFailed => return w.buffered(),
+    };
+    return w.buffered();
 }
 
 pub inline fn eql(a: []const u8, b: []const u8) bool {

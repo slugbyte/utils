@@ -1,5 +1,5 @@
 const std = @import("std");
-const util = @import("./root.zig");
+const util = @import("../root.zig");
 
 // TODO: rename Reporter
 // TODO: track success/failure/warning count
@@ -70,9 +70,9 @@ pub inline fn getAllError(self: Reporter) [][]const u8 {
 }
 
 pub inline fn pushWarning(self: *Reporter, comptime format: []const u8, args: anytype) !void {
-    try self.warn_list.append(self.allocator, try std.fmt.allocPrint(self.allocator, format, args));
+    try self.warn_list.append(self.allocator, try util.fmt(self.allocator, format, args));
 }
 
 pub inline fn pushError(self: *Reporter, comptime format: []const u8, args: anytype) !void {
-    try self.error_list.append(self.allocator, try std.fmt.allocPrint(self.allocator, format, args));
+    try self.error_list.append(self.allocator, try util.fmt(self.allocator, format, args));
 }
