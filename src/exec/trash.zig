@@ -15,7 +15,9 @@ pub const help_msg =
     \\
     \\  --version                 print version
     \\  -r --revert trash_file    (linux-only) revert a file from trash back to where it came from
-    \\  -R --revert-fzf           (linux-only) use fzf to select a trash_file to revert
+    \\  -R --revert-fzf           (linux-only) use fzf to revert a trash file
+    \\  -f --fetch trash_file     (linux-only) fetch a file from the trash to the current dir
+    \\  -F --fetch-fzf            (linux-only) use fzf to feth a trash_file
     \\  --viu                     add support for viu block image display in fzf preview
     \\  -s --silent               dont print trash paths
     \\  -h --help                 display help
