@@ -1,16 +1,15 @@
 const std = @import("std");
 const util = @import("../root.zig");
+const Allocator = std.mem.Allocator;
 
-// TODO: rename Reporter
-// TODO: track success/failure/warning count
-
+/// accumulates error and warning messages
 const Reporter = @This();
-// accumulate warnings so that they can be reported at the end
-allocator: std.mem.Allocator,
+
+allocator: Allocator,
 warn_list: std.ArrayList([]const u8),
 error_list: std.ArrayList([]const u8),
 
-pub fn init(allocator: std.mem.Allocator) Reporter {
+pub fn init(allocator: Allocator) Reporter {
     return .{
         .allocator = allocator,
         .warn_list = .empty,
@@ -30,7 +29,7 @@ pub fn deinit(self: *Reporter) void {
     self.* = undefined;
 }
 
-pub fn PANIC(self: Reporter, comptime format: []const u8, args: anytype) noreturn {
+pub fn PANIC_WITH_REPORT(self: Reporter, comptime format: []const u8, args: anytype) noreturn {
     self.report();
     std.debug.panic(format, args);
 }
@@ -69,10 +68,10 @@ pub inline fn getAllError(self: Reporter) [][]const u8 {
     return self.error_list.items;
 }
 
-pub inline fn pushWarning(self: *Reporter, comptime format: []const u8, args: anytype) !void {
+pub inline fn pushWarning(self: *Reporter, comptime format: []const u8, args: anytype) Allocator.Error!void {
     try self.warn_list.append(self.allocator, try util.fmt(self.allocator, format, args));
 }
 
-pub inline fn pushError(self: *Reporter, comptime format: []const u8, args: anytype) !void {
+pub inline fn pushError(self: *Reporter, comptime format: []const u8, args: anytype) Allocator.Error!void {
     try self.error_list.append(self.allocator, try util.fmt(self.allocator, format, args));
 }

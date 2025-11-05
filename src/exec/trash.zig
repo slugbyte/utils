@@ -6,8 +6,7 @@ const build_option = @import("build_option");
 const Allocator = std.mem.Allocator;
 const WorkDir = util.WorkDir;
 const Reporter = util.Reporter;
-const FlagParser = util.FlagParser;
-const BinaryDetectorWriter = util.BinaryDetectorWriter;
+const NullByteDetectorWriter = util.NullByteDetectorWriter;
 
 pub const help_msg =
     \\USAGE: trash files.. (--flags)
@@ -51,7 +50,7 @@ pub fn main() !void {
             build_option.commit_id[0..8],
             build_option.date,
         });
-        return;
+        ctx.reporter.EXIT_WITH_REPORT(0);
     }
     if (ctx.flag_version) {
         util.log("trash version: ({s}) {s} {s} -- '{s}'", .{
@@ -60,7 +59,7 @@ pub fn main() !void {
             build_option.commit_id[0..8],
             build_option.description,
         });
-        return;
+        ctx.reporter.EXIT_WITH_REPORT(0);
     }
 
     if (ctx.flag_revert) |value| {
@@ -96,7 +95,7 @@ pub fn main() !void {
             continue;
         };
         const trash_path = ctx.cwd.trash(ctx.arena, path, stat.kind) catch |err| switch (err) {
-            else => ctx.reporter.PANIC("unexpected error: {t}", .{err}),
+            else => ctx.reporter.PANIC_WITH_REPORT("unexpected error: {t}", .{err}),
             error.TrashFileKindNotSupported => {
                 fail_count +|= 1;
                 try ctx.reporter.pushWarning("trash does not support '{t}' files, unable to trash: {s}", .{ stat.kind, path });
@@ -186,11 +185,11 @@ pub fn revertFZFPreview(ctx: *Context, trash_name: []const u8) !void {
 
     const file = try ctx.cwd.filepathOpen(revert_info.trash_path, .{});
     var reader = file.reader(&.{});
-    var binary_detector_buffer: [1024]u8 = undefined;
-    var binary_detector = try BinaryDetectorWriter.init(&binary_detector_buffer);
-    _ = reader.interface.streamRemaining(&binary_detector.interface) catch {};
+    var null_detector_buffer: [1024]u8 = undefined;
+    var null_detector = try NullByteDetectorWriter.init(&null_detector_buffer);
+    _ = reader.interface.streamRemaining(&null_detector.interface) catch {};
 
-    if (binary_detector.is_binary) {
+    if (null_detector.contains_null) {
         if (ctx.flag_fzf_preview_viu and util.endsWithAnyIgnoreCase(revert_info.revert_path, &.{ ".png", ".jpg", ".gif", ".jpeg" })) {
             var viu = std.process.Child.init(&.{
                 "viu",
@@ -312,7 +311,7 @@ const Context = struct {
         .parseFn = Context.implParseFn,
         .setArgIteratorFn = Context.implSetArgIterator,
         .setPositionalListFn = Context.implSetPositionalList,
-        .setProgramPathFn = FlagParser.noopSetProgramPath,
+        .setProgramPathFn = util.FlagParser.noopSetProgramPath,
     },
 
     pub fn init(arena: Allocator) !Context {
@@ -350,60 +349,62 @@ const Context = struct {
         return true;
     }
 
+    const FlagEnum = enum {
+        @"--help",
+        h,
+        @"--version",
+        V,
+        @"--silent",
+        s,
+        @"--fetch",
+        f,
+        @"--fetch-fzf",
+        F,
+        @"--revert",
+        r,
+        @"--revert-fzf",
+        R,
+        @"--viu",
+    };
+
     pub fn implParseFn(flag_parser: *util.FlagParser, arg: [:0]const u8, iter: *util.ArgIterator) util.FlagParser.Error!bool {
         var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
 
-        if (util.eqlFlag(arg, "--help", "-h")) {
-            self.flag_help = true;
-            return true;
-        }
-
-        if (util.eqlFlag(arg, "--silent", "-s")) {
-            self.flag_silent = true;
-            return true;
-        }
-
-        if (util.eqlFlag(arg, "--revert", "-r")) {
-            self.flag_revert = iter.next();
-            if (self.flag_revert == null) {
-                try self.reporter.pushError("--revert value missing", .{});
+        var flag_iter = util.FlagIterator(FlagEnum).init(arg);
+        while (flag_iter.next()) |result| {
+            switch (result) {
+                .Flag => |flag| {
+                    switch (flag) {
+                        .h, .@"--help" => self.flag_help = true,
+                        .V, .@"--version" => self.flag_version = true,
+                        .s, .@"--silent" => self.flag_silent = true,
+                        .F, .@"--fetch-fzf" => self.flag_fetch_fzf = true,
+                        .f, .@"--fetch" => {
+                            self.flag_fetch = iter.next();
+                            if (self.flag_fetch == null) {
+                                try self.reporter.pushError("--fetch value missing", .{});
+                            }
+                        },
+                        .R, .@"--revert-fzf" => self.flag_revert_fzf = true,
+                        .r, .@"--revert" => {
+                            self.flag_revert = iter.next();
+                            if (self.flag_revert == null) {
+                                try self.reporter.pushError("--revert value missing", .{});
+                            }
+                        },
+                        .@"--viu" => self.flag_fzf_preview_viu = true,
+                    }
+                },
+                .UnknownLong => |unknown| {
+                    try self.reporter.pushError("unknown long flag: {s}", .{unknown});
+                },
+                .UnknownShort => |unknown| {
+                    try self.reporter.pushError("unknown short flag: -{c}", .{unknown});
+                },
             }
-            return true;
-        }
-        if (util.eqlFlag(arg, "--fetch", "-f")) {
-            self.flag_fetch = iter.next();
-            if (self.flag_fetch == null) {
-                try self.reporter.pushError("--fetch value missing", .{});
-            }
-            return true;
         }
 
-        if (util.eqlFlag(arg, "--revert-fzf", "-R")) {
-            self.flag_revert_fzf = true;
-            return true;
-        }
-
-        if (util.eqlFlag(arg, "--fetch-fzf", "-F")) {
-            self.flag_fetch_fzf = true;
-            return true;
-        }
-
-        if (util.eql(arg, "--fzf-preview")) {
-            self.flag_fzf_preview = iter.next();
-            if (self.flag_fzf_preview == null) {
-                try self.reporter.pushError("--fzf-preview value missing", .{});
-            }
-            return true;
-        }
-        if (util.eql(arg, "--viu")) {
-            self.flag_fzf_preview_viu = true;
-            return true;
-        }
-        if (util.eql(arg, "--version")) {
-            self.flag_version = true;
-            return true;
-        }
-
+        if (flag_iter.isFlag()) return true;
         return false;
     }
 };

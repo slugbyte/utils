@@ -6,7 +6,7 @@ pub const ArgIterator = @This();
 pub const Error = error{
     MissingValue,
     ParseFalied,
-} || Allocator.Error || std.fs.Dir.StatFileError;
+} || Allocator.Error;
 
 // inner: std.process.ArgIterator,
 args: [][:0]u8,
@@ -85,42 +85,68 @@ pub inline fn nextFloat(self: *ArgIterator, T: type) !T {
 
 pub inline fn nextEnum(self: *ArgIterator, T: type) !T {
     const arg = try self.nextOrFail();
-    return std.meta.stringToEnum(T, arg) catch return Error.ParseFailed;
+    return std.meta.stringToEnum(T, arg) orelse return Error.ParseFailed;
 }
 
-pub inline fn nextFileOpen(self: *ArgIterator, flags: std.fs.File.OpenFlags) !std.fs.File {
-    const file_path = try self.nextFilePath();
-    if (file_path.stat.kind != .file) return Error.ParseFailed;
-    return try std.fs.cwd().openFile(file_path.path, flags);
-}
+/// convert an arg `[]const u8` into a enum
+/// if its a long flag `--flag` it will just parse the whole arg as an enum
+/// if its a short flag `-SiCk` it will parse each char as an enum
+pub fn FlagIterator(FlagEnum: type) type {
+    if (@typeInfo(FlagEnum) != .@"enum") {
+        @compileError("FlagIterator expects an enum");
+    }
+    return struct {
+        arg: []const u8,
+        is_long: bool,
+        index: usize = 0,
 
-pub inline fn nextFileRead(self: *ArgIterator, allocator: Allocator) ![:0]const u8 {
-    const file = try self.nextFileOpen(.{});
-    // TODO: can i remove this buffer? it seems like it might not be needed when streamReamaing to Writer.Allocating...
-    var buffer: [4 * 1024]u8 = undefined;
-    var file_reader = file.reader(&buffer);
-    var allocating = std.Io.Writer.Allocating.init(allocator);
-    errdefer allocating.deinit();
-    _ = file_reader.interface.streamRemaining(&allocating.writer) catch return Error.OutOfMemory;
-    return try allocating.toOwnedSliceSentinel(0);
-}
+        const empty: @This() = .{ .arg = "", .is_long = false };
 
-pub inline fn nextFileParseZon(self: *ArgIterator, T: type, allocator: Allocator, diagnostics: ?*std.zon.parse.Diagnostics, options: std.zon.parse.Options) !T {
-    const file_content = try self.nextFileRead(Allocator);
-    defer allocator.free(file_content);
-    return std.zon.parse.fromSlice(T, allocator, file_content, diagnostics, options) catch Error.ParseFailed;
-}
+        const NextResult = union(enum) {
+            /// the long or short arg cast as the enum
+            Flag: FlagEnum,
+            /// the arg started with `--` but could not be cast as the enum
+            UnknownLong: []const u8,
+            /// the arg started with `-` but the char could not be cast as the enmu
+            UnknownShort: u8,
+        };
 
-pub const FilePath = struct {
-    stat: std.fs.File.Stat,
-    path: [:0]const u8,
-};
+        pub fn init(arg: []const u8) @This() {
+            if (std.mem.startsWith(u8, arg, "--")) return .{
+                .arg = arg,
+                .is_long = true,
+            };
+            if (std.mem.startsWith(u8, arg, "-")) return .{
+                .arg = arg[1..],
+                .is_long = false,
+            };
+            return @This().empty;
+        }
 
-pub inline fn nextFilePath(self: *ArgIterator) !FilePath {
-    const arg = try self.nextOrFail();
-    const stat = try std.fs.cwd().statFile(arg);
-    return .{
-        .path = arg,
-        .stat = stat,
+        pub inline fn isFlag(self: @This()) bool {
+            return self.index != 0;
+        }
+
+        pub fn next(self: *@This()) ?NextResult {
+            if (self.arg.len == 0) return null;
+
+            if (self.is_long) {
+                if (self.index != 0) return null;
+                self.index += 1;
+                if (std.meta.stringToEnum(FlagEnum, self.arg)) |value| {
+                    return NextResult{ .Flag = value };
+                }
+                return NextResult{ .UnknownLong = self.arg };
+            }
+
+            if (self.index < self.arg.len) {
+                defer self.index += 1;
+                if (std.meta.stringToEnum(FlagEnum, self.arg[self.index..][0..1])) |value| {
+                    return NextResult{ .Flag = value };
+                }
+                return NextResult{ .UnknownShort = self.arg[self.index] };
+            }
+            return null;
+        }
     };
 }

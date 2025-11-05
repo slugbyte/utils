@@ -49,7 +49,7 @@ pub fn main() !void {
             build_option.date,
             build_option.description,
         });
-        std.process.exit(1);
+        ctx.reporter.EXIT_WITH_REPORT(0);
     }
 
     if (ctx.flag_version) {
@@ -59,13 +59,13 @@ pub fn main() !void {
             build_option.commit_id[0..8],
             build_option.description,
         });
-        return;
+        ctx.reporter.EXIT_WITH_REPORT(0);
     }
 
     switch (ctx.positionals.len) {
         0, 1 => {
             util.log("USAGE: move src.. dest\n    (clobber flags --trash --backup)", .{});
-            std.process.exit(1);
+            ctx.reporter.EXIT_WITH_REPORT(1);
         },
         2 => {
             const src_path = ctx.positionals[0];
@@ -230,7 +230,7 @@ pub fn move(ctx: *Context, src_path: [:0]const u8, dest_path: [:0]const u8) !voi
 
     if (try ctx.cwd.exists(real_dest_path)) {
         switch (ctx.flag_clobber_style) {
-            .NoClobber => ctx.reporter.PANIC("NoClobber should be unreachable", .{}),
+            .NoClobber => ctx.reporter.PANIC_WITH_REPORT("NoClobber should be unreachable", .{}),
             .Trash => {
                 const stat = (try ctx.cwd.stat(real_dest_path)).?;
                 const trash_path = try ctx.cwd.trash(ctx.arena, real_dest_path, stat.kind);
@@ -310,34 +310,43 @@ const Context = struct {
         }
     };
 
+    pub const FlagEnum = enum {
+        @"--help",
+        h,
+        @"--version",
+        V,
+        @"--trash",
+        t,
+        @"--backup",
+        b,
+        @"--rename",
+        r,
+        @"--silent",
+        s,
+    };
+
     pub fn implParseFn(flag_parser: *util.FlagParser, arg: [:0]const u8, _: *util.ArgIterator) FlagParser.Error!bool {
         var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        if (util.eqlFlag(arg, "--trash", "-t")) {
-            self.flag_clobber_style.prioritySet(.Trash);
-            return true;
+        var flag_iter = util.FlagIterator(FlagEnum).init(arg);
+        while (flag_iter.next()) |result| {
+            switch (result) {
+                .Flag => |flag| switch (flag) {
+                    .h, .@"--help" => self.flag_help = true,
+                    .V, .@"--version" => self.flag_version = true,
+                    .s, .@"--silent" => self.flag_silent = true,
+                    .r, .@"--rename" => self.flag_rename = true,
+                    .t, .@"--trash" => self.flag_clobber_style.prioritySet(.Trash),
+                    .b, .@"--backup" => self.flag_clobber_style.prioritySet(.Backup),
+                },
+                .UnknownLong => |unknown| {
+                    try self.reporter.pushError("unknown long flag: {s}", .{unknown});
+                },
+                .UnknownShort => |unknown| {
+                    try self.reporter.pushError("unknown short flag: -{c}", .{unknown});
+                },
+            }
         }
-        if (util.eqlFlag(arg, "--backup", "-b")) {
-            self.flag_clobber_style.prioritySet(.Backup);
-            return true;
-        }
-        if (util.eqlFlag(arg, "--rename", "-r")) {
-            self.flag_rename = true;
-            return true;
-        }
-        if (util.eql(arg, "--silent")) {
-            self.flag_silent = true;
-            return true;
-        }
-        if (util.eql(arg, "--version")) {
-            self.flag_version = true;
-            return true;
-        }
-
-        if (util.eqlFlag(arg, "--help", "-h")) {
-            self.flag_help = true;
-            return true;
-        }
-
+        if (flag_iter.isFlag()) return true;
         return false;
     }
 
