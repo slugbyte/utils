@@ -294,6 +294,11 @@ const Context = struct {
             std.debug.print("'{s}' ", .{arg});
         }
         std.debug.print("\n", .{});
+        std.debug.print("POSITIONALS: ", .{});
+        for (self.positionals) |arg| {
+            std.debug.print("'{s}' ", .{arg});
+        }
+        std.debug.print("\n", .{});
         util.logFlagFields(Context, self.*);
         std.debug.print("---------------------------------------------------------------------------------\n", .{});
     }

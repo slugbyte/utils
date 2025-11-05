@@ -5,7 +5,7 @@ pub const env = @import("./util/env.zig");
 pub const known_file = @import("./util/known_file.zig");
 
 pub const ArgIterator = @import("./util/ArgIterator.zig");
-pub const FlagIterator = ArgIterator.FlagIterator;
+pub const FlagIterator = @import("./util/FlagIterator.zig").FlagIterator;
 pub const FlagParser = @import("./util/FlagParser.zig");
 pub const Reporter = @import("./util/Reporter.zig");
 pub const WorkDir = @import("./util/WorkDir.zig");
