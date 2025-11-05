@@ -20,15 +20,6 @@ pub fn log(comptime format: []const u8, arg: anytype) void {
     std.debug.print("{s}\n", .{msg});
 }
 
-pub fn logFlagFields(comptime T: type, value: T) void {
-    const info = @typeInfo(T);
-    inline for (info.@"struct".fields) |field| {
-        if (std.mem.startsWith(u8, field.name, "flag_") and std.mem.indexOf(u8, field.name, "parser") == null) {
-            std.debug.print("{s: <30}: {any}\n", .{ field.name, @field(value, field.name) });
-        }
-    }
-}
-
 pub fn isString(T: type) bool {
     switch (T) {
         []u8,
@@ -126,4 +117,35 @@ pub inline fn endsWithAnyIgnoreCase(haystack: []const u8, needles: []const []con
         }
     }
     return false;
+}
+
+/// prints "{header}: 'item0' 'item1' ...\n"
+pub fn debugPrintArgIterator(arg_iterator: *ArgIterator, header: []const u8, skip_exe: bool) void {
+    arg_iterator.reset();
+    if (skip_exe) {
+        _ = arg_iterator.skip();
+    }
+    std.debug.print("{s}: ", .{header});
+    while (arg_iterator.next()) |arg| {
+        std.debug.print("'{s}' ", .{arg});
+    }
+    std.debug.print("\n", .{});
+}
+
+/// prints "{header}: 'item0' 'item1' ...\n"
+pub fn debugPrintPositionalList(positional_list: [][:0]const u8, header: []const u8) void {
+    std.debug.print("{s}: ", .{header});
+    for (positional_list) |arg| {
+        std.debug.print("'{s}' ", .{arg});
+    }
+}
+
+/// prints all the fields in a struct that begin with `flag_`
+pub fn debugPrintFlagFields(comptime T: type, value: T) void {
+    const info = @typeInfo(T);
+    inline for (info.@"struct".fields) |field| {
+        if (std.mem.startsWith(u8, field.name, "flag_") and std.mem.indexOf(u8, field.name, "parser") == null) {
+            std.debug.print("{s: <30}: {any}\n", .{ field.name, @field(value, field.name) });
+        }
+    }
 }

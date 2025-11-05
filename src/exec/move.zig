@@ -268,9 +268,9 @@ const Context = struct {
     flag_clobber_style: ClobberStyle = .NoClobber,
     flag_parser: util.FlagParser = .{
         .parseFn = Context.implParseFn,
-        .setArgIteratorFn = Context.implSetArgIterator,
-        .setPositionalListFn = Context.implSetPositionalList,
         .setProgramPathFn = FlagParser.noopSetProgramPath,
+        .setArgIteratorFn = FlagParser.autoSetArgIterator(Context, "flag_parser", "args"),
+        .setPositionalListFn = FlagParser.autoSetPositionalList(Context, "flag_parser", "positionals"),
     },
 
     pub fn init(arena: Allocator) !Context {
@@ -287,19 +287,9 @@ const Context = struct {
 
     pub fn debugPrint(self: *Context) void {
         std.debug.print("---------------------------------------------------------------------------------\n", .{});
-        self.args.reset();
-        _ = self.args.skip();
-        std.debug.print("ARGS: ", .{});
-        while (self.args.next()) |arg| {
-            std.debug.print("'{s}' ", .{arg});
-        }
-        std.debug.print("\n", .{});
-        std.debug.print("POSITIONALS: ", .{});
-        for (self.positionals) |arg| {
-            std.debug.print("'{s}' ", .{arg});
-        }
-        std.debug.print("\n", .{});
-        util.logFlagFields(Context, self.*);
+        util.debugPrintArgIterator(&self.args, "ARGS", true);
+        util.debugPrintPositionalList(self.positionals, "POSITIONALS");
+        util.debugPrintFlagFields(Context, self.*);
         std.debug.print("---------------------------------------------------------------------------------\n", .{});
     }
 
@@ -315,7 +305,7 @@ const Context = struct {
         }
     };
 
-    pub const FlagEnum = enum {
+    pub const Flags = enum {
         @"--help",
         h,
         @"--version",
@@ -332,7 +322,7 @@ const Context = struct {
 
     pub fn implParseFn(flag_parser: *util.FlagParser, arg: [:0]const u8, _: *util.ArgIterator) FlagParser.Error!bool {
         var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        var flag_iter = util.FlagIterator(FlagEnum).init(arg);
+        var flag_iter = util.FlagIterator(Flags).init(arg);
         while (flag_iter.next()) |result| {
             switch (result) {
                 .Flag => |flag| switch (flag) {
@@ -353,17 +343,5 @@ const Context = struct {
         }
         if (flag_iter.isFlag()) return true;
         return false;
-    }
-
-    pub fn implSetPositionalList(flag_parser: *util.FlagParser, positional: [][:0]const u8) bool {
-        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        self.positionals = positional;
-        return true;
-    }
-
-    pub fn implSetArgIterator(flag_parser: *util.FlagParser, iter: util.ArgIterator) bool {
-        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
-        self.args = iter;
-        return true;
     }
 };

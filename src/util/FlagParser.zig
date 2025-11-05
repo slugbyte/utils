@@ -52,3 +52,36 @@ pub fn noopSetPositionalList(_: *FlagParser, _: [][:0]const u8) bool {
 pub fn noopSetArgIterator(_: *FlagParser, _: ArgIterator) bool {
     return false;
 }
+
+pub fn autoSetArgIterator(T: type, comptime interface_field: []const u8, comptime value_field: []const u8) *const fn (*FlagParser, ArgIterator) bool {
+    const Temp = struct {
+        pub fn implSetArgIterator(flag_parser: *FlagParser, iter: ArgIterator) bool {
+            var self = @as(*T, @fieldParentPtr(interface_field, flag_parser));
+            @field(self, value_field) = iter;
+            return true;
+        }
+    };
+    return Temp.implSetArgIterator;
+}
+
+pub fn autoSetPositionalList(T: type, comptime interface_field: []const u8, comptime value_field: []const u8) *const fn (*FlagParser, [][:0]const u8) bool {
+    const Temp = struct {
+        pub fn implSetArgIterator(flag_parser: *FlagParser, positional_list: [][:0]const u8) bool {
+            var self = @as(*T, @fieldParentPtr(interface_field, flag_parser));
+            @field(self, value_field) = positional_list;
+            return true;
+        }
+    };
+    return Temp.implSetArgIterator;
+}
+
+pub fn autoSetProgramPath(T: type, comptime interface_field: []const u8, comptime value_field: []const u8) *const fn (*FlagParser, [:0]const u8) bool {
+    const Temp = struct {
+        pub fn implSetArgIterator(flag_parser: *FlagParser, program_path: [:0]const u8) bool {
+            var self = @as(*T, @fieldParentPtr(interface_field, flag_parser));
+            @field(self, value_field) = program_path;
+            return true;
+        }
+    };
+    return Temp.implSetArgIterator;
+}
