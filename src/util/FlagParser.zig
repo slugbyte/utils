@@ -6,13 +6,18 @@ pub const Error = error{Unknown} || ArgIterator.Error;
 pub const FlagParser = @This();
 
 /// return true if arg is a flag
-parseFn: *const fn (*FlagParser, [:0]const u8, *ArgIterator) Error!bool,
+parseFn: *const fn (*FlagParser, [:0]const u8, *ArgIterator) Error!ArgType,
 /// return true if ArgIterator is now owned by caller
 setArgIteratorFn: *const fn (*FlagParser, ArgIterator) bool,
 /// return true if positional_list is now owned by caller
 setPositionalListFn: *const fn (*FlagParser, [][:0]const u8) bool,
 /// return true if program_path is now owned by caller
 setProgramPathFn: *const fn (*FlagParser, [:0]const u8) bool,
+
+pub const ArgType = enum {
+    Positional,
+    NotPositional,
+};
 
 pub fn parse(flag_parser: *FlagParser, allocator: Allocator) !void {
     var iter = try ArgIterator.init(allocator);
@@ -32,7 +37,7 @@ pub fn parse(flag_parser: *FlagParser, allocator: Allocator) !void {
     var positional = std.ArrayList([:0]const u8).empty;
     errdefer positional.deinit(allocator);
     while (iter.next()) |arg| {
-        if (!try flag_parser.parseFn(flag_parser, arg, &iter)) {
+        if (try flag_parser.parseFn(flag_parser, arg, &iter) == .Positional) {
             try positional.append(allocator, try allocator.dupeZ(u8, arg));
         }
     }

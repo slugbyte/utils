@@ -266,7 +266,7 @@ const Context = struct {
     flag_rename: bool = false,
     flag_silent: bool = false,
     flag_clobber_style: ClobberStyle = .NoClobber,
-    flag_parser: util.FlagParser = .{
+    flag_parser: FlagParser = .{
         .parseFn = Context.implParseFn,
         .setProgramPathFn = FlagParser.noopSetProgramPath,
         .setArgIteratorFn = FlagParser.autoSetArgIterator(Context, "flag_parser", "args"),
@@ -320,8 +320,8 @@ const Context = struct {
         s,
     };
 
-    pub fn implParseFn(flag_parser: *util.FlagParser, arg: [:0]const u8, _: *util.ArgIterator) FlagParser.Error!bool {
-        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
+    pub fn implParseFn(flag_parser: *FlagParser, arg: [:0]const u8, _: *util.ArgIterator) FlagParser.Error!FlagParser.ArgType {
+        var self: *Context = @fieldParentPtr("flag_parser", flag_parser);
         var flag_iter = util.FlagIterator(Flags).init(arg);
         while (flag_iter.next()) |result| {
             switch (result) {
@@ -341,7 +341,7 @@ const Context = struct {
                 },
             }
         }
-        if (flag_iter.isFlag()) return true;
-        return false;
+        if (flag_iter.isFlag()) return .NotPositional;
+        return .Positional;
     }
 };

@@ -20,6 +20,21 @@ pub fn log(comptime format: []const u8, arg: anytype) void {
     std.debug.print("{s}\n", .{msg});
 }
 
+pub fn exeExists(allocator: Allocator, exe_name: []const u8) !bool {
+    var child = std.process.Child.init(&.{ "which", exe_name }, allocator);
+    child.stderr_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stdin_behavior = .Ignore;
+    try child.spawn();
+
+    switch (try child.wait()) {
+        .Exited => |status| {
+            return status == 0;
+        },
+        else => return error.UnexpectedTerm,
+    }
+}
+
 pub fn isString(T: type) bool {
     switch (T) {
         []u8,
@@ -138,6 +153,7 @@ pub fn debugPrintPositionalList(positional_list: [][:0]const u8, header: []const
     for (positional_list) |arg| {
         std.debug.print("'{s}' ", .{arg});
     }
+    std.debug.print("\n", .{});
 }
 
 /// prints all the fields in a struct that begin with `flag_`

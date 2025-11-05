@@ -11,14 +11,16 @@ const NullByteDetectorWriter = util.NullByteDetectorWriter;
 
 pub const help_msg =
     \\USAGE: trash files.. (--flags)
-    \\  Move files to $trash.
+    \\  Move files to the trash.
+    \\  Revert trash fetch back to where they came from. 
+    \\  Fetch trash files to current dir.
     \\
     \\  --version                 print version
     \\  -r --revert trash_file    (linux-only) revert a file from trash back to where it came from
     \\  -R --revert-fzf           (linux-only) use fzf to revert a trash file
     \\  -F --fetch-fzf            (linux-only) use fzf to fetch a trash_file to the current dir
     \\     --viu                  add support for viu block image display in fzf preview
-    \\  -s --silent               dont print trash paths
+    \\  -s --silent               only print errors
     \\  -h --help                 display help
 ;
 
@@ -64,11 +66,11 @@ pub fn main() !void {
     }
 
     if (ctx.flag_revert) |value| {
-        return revert(&ctx, value);
+        return revertTrash(&ctx, value);
     }
 
     if (ctx.flag_fetch) |value| {
-        return fetch(&ctx, value);
+        return fetchTrash(&ctx, value);
     }
 
     if (ctx.flag_revert_fzf) {
@@ -191,7 +193,8 @@ pub fn revertFZFPreview(ctx: *Context, trash_name: []const u8) !void {
     _ = reader.interface.streamRemaining(&null_detector.interface) catch {};
 
     if (null_detector.contains_null) {
-        if (ctx.flag_fzf_preview_viu and util.endsWithAnyIgnoreCase(revert_info.revert_path, &.{ ".png", ".jpg", ".gif", ".jpeg" })) {
+        const is_image = util.endsWithAnyIgnoreCase(revert_info.revert_path, &.{ ".png", ".gif", ".jpg", ".jpeg" });
+        if (ctx.flag_fzf_preview_viu and is_image and try util.exeExists(ctx.arena, "viu")) {
             var viu = std.process.Child.init(&.{
                 "viu",
                 "-w",
@@ -217,9 +220,8 @@ pub fn revertFZFPreview(ctx: *Context, trash_name: []const u8) !void {
     }
 }
 
-/// trashname can be a filename in trash or a full path..
-/// reveht actually taskes the basename of trash_name and then trys to find that in trash_dirpath
-pub fn revert(ctx: *Context, trash_name: []const u8) !void {
+/// trash_name gets basenamed, so it can be a path (but the dirname will be ignored).
+pub fn revertTrash(ctx: *Context, trash_name: []const u8) !void {
     if (builtin.os.tag != .linux) {
         try ctx.reporter.pushError("--revert is only supported on linux", .{});
     } else {
@@ -231,7 +233,8 @@ pub fn revert(ctx: *Context, trash_name: []const u8) !void {
     }
 }
 
-pub fn fetch(ctx: *Context, trash_name: []const u8) !void {
+/// trash_name gets basenamed, so it can be a path (but the dirname will be ignored).
+pub fn fetchTrash(ctx: *Context, trash_name: []const u8) !void {
     if (builtin.os.tag != .linux) {
         try ctx.reporter.pushError("--revert is only supported on linux", .{});
     } else {
@@ -263,8 +266,17 @@ pub fn fzfTrash(ctx: *Context, fzf_mode: FZFMode) !void {
                 try fzf_option_list.append(ctx.arena, '\n');
             }
         }
-
-        const viu_flag = if (ctx.flag_fzf_preview_viu) "--viu" else "";
+        const viu_flag = blk: {
+            if (ctx.flag_fzf_preview_viu) {
+                if (!(try util.exeExists(ctx.arena, "viu"))) {
+                    try ctx.reporter.pushError("--viu set but viu executable not found", .{});
+                    ctx.reporter.EXIT_WITH_REPORT(1);
+                }
+                break :blk "--viu";
+            } else {
+                break :blk "";
+            }
+        };
         var child = std.process.Child.init(&.{
             "fzf",
             "--preview",
@@ -285,8 +297,8 @@ pub fn fzfTrash(ctx: *Context, fzf_mode: FZFMode) !void {
             return;
         }
         switch (fzf_mode) {
-            .Fetch => try fetch(ctx, revert_path),
-            .Revert => try revert(ctx, revert_path),
+            .Fetch => try fetchTrash(ctx, revert_path),
+            .Revert => try revertTrash(ctx, revert_path),
         }
         return;
     }
@@ -348,11 +360,12 @@ const Context = struct {
         r,
         @"--revert-fzf",
         R,
+        @"--fzf-preview",
         @"--viu",
     };
 
-    pub fn implParseFn(flag_parser: *FlagParser, arg: [:0]const u8, iter: *util.ArgIterator) FlagParser.Error!bool {
-        var self = @as(*Context, @fieldParentPtr("flag_parser", flag_parser));
+    pub fn implParseFn(flag_parser: *FlagParser, arg: [:0]const u8, iter: *util.ArgIterator) FlagParser.Error!FlagParser.ArgType {
+        var self: *Context = @fieldParentPtr("flag_parser", flag_parser);
 
         var flag_iter = util.FlagIterator(Flags).init(arg);
         while (flag_iter.next()) |result| {
@@ -376,6 +389,12 @@ const Context = struct {
                                 try self.reporter.pushError("--revert value missing", .{});
                             }
                         },
+                        .@"--fzf-preview" => {
+                            self.flag_fzf_preview = iter.next();
+                            if (self.flag_fzf_preview == null) {
+                                try self.reporter.pushError("--fzf-preview value missing", .{});
+                            }
+                        },
                         .@"--viu" => self.flag_fzf_preview_viu = true,
                     }
                 },
@@ -388,7 +407,7 @@ const Context = struct {
             }
         }
 
-        if (flag_iter.isFlag()) return true;
-        return false;
+        if (flag_iter.isFlag()) return .NotPositional;
+        return .Positional;
     }
 };
