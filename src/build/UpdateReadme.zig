@@ -36,19 +36,18 @@ const README_CONTENT =
     \\# safeutils
     \\> coreutil replacements that aim to protect me from overwriting work.
     \\
-    \\## about
+    \\## About
     \\I lost work one too many times, by accidently overwriting data with coreutils. I made these utils to
     \\reduce the chances that would happen again. They provide much less dangerous clobber strats.
     \\ 
-    \\### clobber strats
-    \\* `trash` - move files to trash but rename them so they dont confict `_00.ext, _01.ext, _02.ext ..`
-    \\* `backup` -  move original file to `(original_path).backup~`
-    \\   * if a backup allready exists it will be moved to trash
+    \\### Clobber Strats
+    \\* `trash` - move files to trash but rename conflicts `(name)_00.(ext) (name)_01.(ext)...`
+    \\* `backup` -  rename original file to `(original).backup~` and trash any previous backups.
     \\
     \\## trash (rm replacement)
-    \\'--revert-fzf' and '--fetch-fzf' have a custom [fzf](https://github.com/junegunn/fzf) preview for displaying:
-    \\* A header with the original path, file type, and file size.
-    \\* File content: text is printed, non-text prints `binary data` except images can optionaly be displayed with [viu](https://github.com/atanunq/viu)
+    \\`--revert-fzf` and `--fetch-fzf` have a custom [fzf](https://github.com/junegunn/fzf) preview with...
+    \\* A header section with the `original path`, `file type`, and `file size`.
+    \\* A content section where text is printed, non-text prints `binary data` except images can optionaly be displayed with [viu](https://github.com/atanunq/viu)
     \\```
     \\{s}
     \\```
