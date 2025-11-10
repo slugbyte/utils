@@ -117,6 +117,20 @@ pub fn trash(self: WorkDir, allocator: Allocator, path: []const u8, kind: std.fs
     }
 }
 
+pub fn realpathZ(self: WorkDir, allocator: Allocator, path: []const u8) ![:0]const u8 {
+    if (std.fs.path.isAbsolute(path)) {
+        var result_sa = util.StackFilepathAllocator.empty;
+        const result = try std.fs.path.resolve(result_sa.allocatorInvalidatePrevious(), &.{path});
+        return try allocator.dupeZ(u8, result);
+    } else {
+        var cwd_path_sa = util.StackFilepathAllocator.empty;
+        const cwd_path = try self.dir.realpathAlloc(cwd_path_sa.allocatorInvalidatePrevious(), ".");
+        var result_sa = util.StackFilepathAllocator.empty;
+        const result = try std.fs.path.resolve(result_sa.allocatorInvalidatePrevious(), &.{ cwd_path, path });
+        return try allocator.dupeZ(u8, result);
+    }
+}
+
 /// check if two paths resolve to same location on the filestem
 pub fn isPathSameLocation(self: WorkDir, path_a: []const u8, path_b: []const u8) !bool {
     var buffer: [3 * std.fs.max_path_bytes]u8 = undefined;

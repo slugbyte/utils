@@ -18,10 +18,16 @@ const help =
     \\Usage: copy src.. dest (--flags)
     \\  Copy a file, multiple files, or a directory to a destination.
     \\  When copying files into a directory dest must have a '/' at the end.
+    \\
+    \\  When copying multiple src files, it will error if they end up having a conflicting destination.
     \\  
-    \\  -d --dir             dirs copy recursively, and clbber dest on conflict (dirs and files clobber)
-    \\  -m --merge           dirs copy recursively, and merge with dest dirs on confilct (only file cloober)
+    \\  -d --dir             dirs copy recursively, and cobber conflicts
+    \\                       --dir can only have one src if clobbering dest
+    \\  -m --merge           dirs copy recursively, but src_dirs dont clobber dest_dirs
+    \\                       when merging src dirs files from later args overwrite files form earlier args   
+    \\                       --merge can only merge with dest if all src paths are dirs
     \\  -t --trash           trash conflicting files
+    \\  -c --create          create dest dir if not exists
     \\  -b --backup          backup conflicting files
 ;
 
@@ -29,104 +35,193 @@ pub fn main() !void {
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     var ctx = try Context.init(arena_instance.allocator());
     if (ctx.reporter.isTrouble()) {
-        logUsage();
         ctx.reporter.EXIT_WITH_REPORT(1);
     }
 
-    if (ctx.flag_help) {}
+    if (ctx.flag_help) {
+        util.log("{s}", .{help});
+        ctx.reporter.EXIT_WITH_REPORT(0);
+    }
+
+    if (ctx.flag_version) {
+        util.log("copy version: ({s}) {s} {s} -- '{s}'", .{
+            build_option.date,
+            build_option.change_id[0..8],
+            build_option.commit_id[0..8],
+            build_option.description,
+        });
+        ctx.reporter.EXIT_WITH_REPORT(0);
+    }
 
     switch (ctx.positionals.len) {
         0, 1 => {
             logUsage();
             return;
         },
-        2 => {
-            const src_path: []const u8 = ctx.positionals[0][0..];
-            const src_stat = (try ctx.cwd.statNoFollow(src_path)) orelse {
-                @panic("src need to exists");
-            };
-            switch (src_stat.kind) {
-                .file, .directory, .sym_link => {},
-                else => @panic("todo better error handling for non supported file"),
-            }
-            var dest_path: []const u8 = ctx.positionals[1][0..];
-            var dest_stat = try ctx.cwd.statNoFollow(dest_path);
+        else => {
+            var should_join_src_to_dest = false;
+            const src_input = ctx.positionals[0 .. ctx.positionals.len - 1];
+            const dest_input = ctx.positionals[ctx.positionals.len - 1];
+            var copy_list = try std.ArrayList(CopyItem).initCapacity(ctx.arena, src_input.len);
+
+            const dest_stat = try ctx.cwd.statNoFollow(dest_input);
             if (dest_stat) |stat| {
+                if (ctx.flag_create) {
+                    ctx.flag_create = false;
+                }
                 if (stat.kind == .directory) {
-                    if (util.endsWith(dest_path, "/")) {
-                        dest_path = try path.join(ctx.arena, &.{
-                            dest_path,
-                            path.basename(src_path),
-                        });
-                        dest_stat = try ctx.cwd.statNoFollow(dest_path);
-                    } else {}
+                    if (util.endsWith(dest_input, "/")) {
+                        should_join_src_to_dest = true;
+                    } else {
+                        if (ctx.flag_clobber_style == .NoClobber) {
+                            if (src_input.len > 1) {
+                                try ctx.reporter.pushError("use clobber flags or add '/' to copy into dir", .{});
+                            }
+                        }
+                    }
+                } else {
+                    if (src_input.len > 1 and ctx.flag_dir_style != .Merge) {
+                        try ctx.reporter.pushError("to copy multiple src files dest must be a dir", .{});
+                    }
                 }
             } else {
-                //TODO: --c --create-dest crete dir and update src paths
-
+                if (ctx.flag_create) {
+                    try ctx.cwd.dir.makeDir(dest_input);
+                    should_join_src_to_dest = true;
+                } else {
+                    if (src_input.len > 1 and ctx.flag_dir_style != .Merge) {
+                        try ctx.reporter.pushError("to copy multiple src files dest must be a dir", .{});
+                    }
+                }
             }
 
-            if (dest_stat) |stat| {
-                try handleClobber(&ctx, dest_path, stat);
+            if (ctx.reporter.isError()) {
+                ctx.reporter.EXIT_WITH_REPORT(1);
             }
 
-            try copyRecursive(&ctx, .{
-                .src = src_path,
-                .dest = dest_path,
-                .stat = src_stat,
-            });
+            var dir_count: usize = 0;
+            for (src_input) |src_path| {
+                if (try ctx.cwd.statNoFollow(src_path)) |src_stat| {
+                    switch (src_stat.kind) {
+                        .directory => dir_count += 1,
+                        .file,
+                        .sym_link,
+                        => {},
+                        else => {
+                            try ctx.reporter.pushError("file type not supported [{t}]: ({s})", .{ src_stat.kind, src_path });
+                            continue;
+                        },
+                    }
+                    const dest_name = dest: {
+                        if (should_join_src_to_dest) {
+                            break :dest try ctx.cwd.realpathZ(ctx.arena, try path.joinZ(ctx.arena, &.{ dest_input, path.basename(src_path) }));
+                        } else {
+                            break :dest try ctx.cwd.realpathZ(ctx.arena, dest_input);
+                        }
+                    };
+                    try copy_list.append(ctx.arena, .{
+                        .src = src_path,
+                        .dest = dest_name,
+                        .kind = src_stat.kind,
+                    });
+                    if (src_stat.kind == .directory) {
+                        if (ctx.flag_dir_style == .NoCopy) {
+                            try ctx.reporter.pushError("copy dir requires --dir or --merge: ({s})", .{src_path});
+                            continue;
+                        }
+                        var dir = try ctx.cwd.dir.openDir(src_path, .{ .iterate = true });
+                        var walker = try dir.walk(ctx.arena);
+                        while (try walker.next()) |item| {
+                            try copy_list.append(ctx.arena, .{
+                                .kind = item.kind,
+                                .src = try path.joinZ(ctx.arena, &.{ src_path, item.path }),
+                                .dest = try path.joinZ(ctx.arena, &.{ dest_name, item.path }),
+                            });
+                        }
+                    }
+                } else {
+                    try ctx.reporter.pushError("src file not found: {s}", .{src_path});
+                }
+            }
+
+            if (ctx.flag_dir_style == .Dir and ctx.flag_clobber_style != .NoClobber and !should_join_src_to_dest and src_input.len > 1) {
+                try ctx.reporter.pushError("--dir can only have one src file if dest is clobbered. add '/' or user --merge", .{});
+            }
+
+            // QUESTION: Should this be ok? when do i even what to do this? maby i should limit merge dirs clobbering dest to 1
+            if (ctx.flag_dir_style == .Merge and !should_join_src_to_dest and src_input.len != dir_count) {
+                try ctx.reporter.pushError("merge only works if all src paths are dirs", .{});
+            }
+
+            for (copy_list.items, 0..) |item_a, i| {
+                for (i + 1..copy_list.items.len) |j| {
+                    const item_b = copy_list.items[j];
+                    if (try ctx.cwd.isPathSameLocation(item_a.dest, item_b.dest)) {
+                        try ctx.reporter.pushError("src items have conflicting destination: {s} and {s}", .{ item_a.src, item_b.src });
+                    }
+                }
+            }
+
+            for (copy_list.items) |item| {
+                if (try ctx.cwd.isPathSameLocation(item.src, item.dest)) {
+                    try ctx.reporter.pushError("item cannot be copyed to it self: ({s})", .{item.src});
+                }
+            }
+
+            if (ctx.reporter.isError()) {
+                ctx.reporter.EXIT_WITH_REPORT(1);
+            }
+
+            for (copy_list.items) |item| {
+                try clobber(&ctx, item.dest);
+            }
+
+            if (ctx.flag_create) {
+                ctx.cwd.dir.makeDir(dest_input) catch {};
+            }
+
+            if (ctx.reporter.isError()) {
+                ctx.reporter.report();
+                if (ctx.fail_clobber) {
+                    util.log("clobber flag required (--trash --backup)", .{});
+                }
+                std.process.exit(1);
+            }
+
+            for (copy_list.items) |item| {
+                switch (item.kind) {
+                    .file => try copyFile(&ctx, item),
+                    .directory => try copyDir(&ctx, item),
+                    .sym_link => try copySymLink(&ctx, item),
+                    else => unreachable,
+                }
+            }
             ctx.reporter.EXIT_WITH_REPORT(0);
         },
-        else => {
-            @panic("todo copy more than one src");
-        },
     }
 }
 
-const SrcPath = struct {
-    src: []const u8,
-    stat: ?std.fs.File.Stat,
+const CopyItem = struct {
+    src: [:0]const u8,
+    dest: [:0]const u8,
+    kind: std.fs.File.Kind,
 };
 
-const CopyPath = struct {
-    src: []const u8,
-    dest: []const u8,
-    stat: std.fs.File.Stat,
-};
-
-pub fn copyRecursive(ctx: *Context, copy_path: CopyPath) !void {
-    switch (copy_path.stat.kind) {
-        .file => try copyFile(ctx, copy_path),
-        .directory => try copyDirRecursive(ctx, copy_path),
-        .sym_link => try copySymLink(ctx, copy_path),
-        else => unreachable,
-    }
+inline fn copyFile(ctx: *Context, item: CopyItem) !void {
+    util.assert(item.kind == .file);
+    try ctx.cwd.dir.copyFile(item.src, ctx.cwd.dir, item.dest, .{});
 }
 
-pub fn copyNoRecursive(ctx: *Context, copy_path: CopyPath) !void {
-    switch (copy_path.stat.kind) {
-        .file => try copyFile(ctx, copy_path),
-        .directory => try copyDir(ctx, copy_path),
-        .sym_link => try copySymLink(ctx, copy_path),
-        else => unreachable,
-    }
-}
-
-inline fn copyFile(ctx: *Context, copy_path: CopyPath) !void {
-    util.assert(copy_path.stat.kind == .file);
-    try ctx.cwd.dir.copyFile(copy_path.src, ctx.cwd.dir, copy_path.dest, .{});
-}
-
-inline fn copySymLink(ctx: *Context, copy_path: CopyPath) !void {
-    util.assert(copy_path.stat.kind == .sym_link);
+inline fn copySymLink(ctx: *Context, item: CopyItem) !void {
+    util.assert(item.kind == .sym_link);
     var link_buffer: util.FilepathBuffer = undefined;
-    const link = try ctx.cwd.dir.readLink(copy_path.src, &link_buffer);
-    try ctx.cwd.dir.symLink(link, copy_path.dest, .{});
+    const link = try ctx.cwd.dir.readLink(item.src, &link_buffer);
+    try ctx.cwd.dir.symLink(link, item.dest, .{});
 }
 
-inline fn copyDir(ctx: *Context, copy_path: CopyPath) !void {
-    util.assert(copy_path.stat.kind == .directory);
-    ctx.cwd.dir.makeDir(copy_path.dest) catch |err| switch (err) {
+inline fn copyDir(ctx: *Context, item: CopyItem) !void {
+    util.assert(item.kind == .directory);
+    ctx.cwd.dir.makeDir(item.dest) catch |err| switch (err) {
         error.PathAlreadyExists => {
             if (ctx.flag_dir_style != .Merge) {
                 return err;
@@ -136,53 +231,38 @@ inline fn copyDir(ctx: *Context, copy_path: CopyPath) !void {
     };
 }
 
-pub fn copyDirRecursive(ctx: *Context, copy_path: CopyPath) !void {
-    util.assert(copy_path.stat.kind == .directory);
-    var src_path_list = std.ArrayList(CopyPath).empty;
-    try src_path_list.append(ctx.arena, copy_path);
-    const src_dir = try ctx.cwd.dir.openDir(copy_path.src, .{ .iterate = true });
-    var walker = try src_dir.walk(ctx.arena);
-    while (try walker.next()) |dir_item| {
-        const src = try path.join(ctx.arena, &.{ copy_path.src, dir_item.path });
-        const dest = try path.join(ctx.arena, &.{ copy_path.dest, dir_item.path });
-        const stat = try ctx.cwd.statNoFollow(src) orelse unreachable;
-        try src_path_list.append(ctx.arena, .{
-            .src = src,
-            .dest = dest,
-            .stat = stat,
-        });
-    }
-    for (src_path_list.items) |item| {
-        try copyNoRecursive(ctx, item);
-    }
-}
-
-pub fn handleClobber(ctx: *Context, clobber_path: []const u8, clobber_stat: std.fs.File.Stat) !void {
-    switch (ctx.flag_clobber_style) {
-        .NoClobber => {
-            if (clobber_stat.kind == .directory) {
-                if (ctx.flag_dir_style != .Merge) {
-                    try ctx.reporter.pushError("dest dir exists, add '/' or clobber flag: ({s})", .{clobber_path});
-                    ctx.reporter.EXIT_WITH_REPORT(1);
+pub fn clobber(ctx: *Context, clobber_path: []const u8) !void {
+    if (try ctx.cwd.statNoFollow(clobber_path)) |stat| {
+        switch (ctx.flag_clobber_style) {
+            .NoClobber => {
+                if (stat.kind == .directory) {
+                    if (ctx.flag_dir_style != .Merge) {
+                        try ctx.reporter.pushError("dest path exists: ({s})", .{clobber_path});
+                        ctx.fail_clobber = true;
+                    }
+                } else {
+                    try ctx.reporter.pushError("dest path exists: ({s})", .{clobber_path});
+                    ctx.fail_clobber = true;
                 }
-            } else {
-                try ctx.reporter.pushError("dest path exsist choose clobber flag: ({s})", .{clobber_path});
-                ctx.reporter.EXIT_WITH_REPORT(1);
-            }
-        },
-        .Trash => {
-            const trashpath = try ctx.cwd.trash(ctx.arena, clobber_path, clobber_stat.kind);
-            try ctx.reporter.pushWarning("trashed: $trash/{s}", .{path.basename(trashpath)});
-        },
-        .Backup => {
-            const backup_path = try util.fmt(ctx.arena, "{s}.backup~", .{clobber_path});
-            if (try ctx.cwd.stat(backup_path)) |backup_stat| {
-                const trashpath = try ctx.cwd.trash(ctx.arena, backup_path, backup_stat.kind);
-                try ctx.reporter.pushWarning("trashed: $trash/{s}", .{path.basename(trashpath)});
-            }
-            try ctx.cwd.move(clobber_path, backup_path);
-            try ctx.reporter.pushWarning("backup: {s}", .{backup_path});
-        },
+            },
+            .Trash => {
+                if (stat.kind != .directory or ctx.flag_dir_style != .Merge) {
+                    const trashpath = try ctx.cwd.trash(ctx.arena, clobber_path, stat.kind);
+                    try ctx.reporter.pushWarning("trashed: $trash/{s}", .{path.basename(trashpath)});
+                }
+            },
+            .Backup => {
+                if (stat.kind != .directory or ctx.flag_dir_style != .Merge) {
+                    const backup_path = try util.fmt(ctx.arena, "{s}.backup~", .{clobber_path});
+                    if (try ctx.cwd.stat(backup_path)) |backup_stat| {
+                        const trashpath = try ctx.cwd.trash(ctx.arena, backup_path, backup_stat.kind);
+                        try ctx.reporter.pushWarning("trashed: $trash/{s}", .{path.basename(trashpath)});
+                    }
+                    try ctx.cwd.move(clobber_path, backup_path);
+                    try ctx.reporter.pushWarning("backup: {s}", .{backup_path});
+                }
+            },
+        }
     }
 }
 
@@ -197,11 +277,13 @@ pub const Context = struct {
 
     args: ArgIterator = undefined,
     positionals: [][:0]const u8 = undefined,
+    fail_clobber: bool = false,
     flag_help: bool = false,
     flag_version: bool = false,
     flag_silent: bool = false,
     flag_dir_style: DirStyle = .NoCopy,
     flag_clobber_style: ClobberStyle = .NoClobber,
+    flag_create: bool = false,
     flag_parser: FlagParser = .{
         .parseFn = implParseFn,
         .setArgIteratorFn = FlagParser.autoSetArgIterator(Context, "flag_parser", "args"),
@@ -267,6 +349,8 @@ pub const Context = struct {
         d,
         @"--merge",
         m,
+        @"--create",
+        c,
     };
 
     pub fn implParseFn(flag_parser: *FlagParser, arg: []const u8, _: *ArgIterator) FlagParser.Error!FlagParser.ArgType {
@@ -278,16 +362,17 @@ pub const Context = struct {
                     .h, .@"--help" => self.flag_help = true,
                     .v, .@"--version" => self.flag_version = true,
                     .s, .@"--silent" => self.flag_silent = true,
+                    .c, .@"--create" => self.flag_create = true,
                     .t, .@"--trash" => self.flag_clobber_style.setPriortity(.Trash),
                     .b, .@"--backup" => self.flag_clobber_style.setPriortity(.Backup),
                     .d, .@"--dir" => self.flag_dir_style.setPriortity(.Dir),
                     .m, .@"--merge" => self.flag_dir_style.setPriortity(.Merge),
                 },
                 .UnknownLong => |unknown| {
-                    util.log("unknown short: {s}", .{unknown});
+                    try self.reporter.pushError("unknown flag: {s}", .{unknown});
                 },
                 .UnknownShort => |unknown| {
-                    util.log("unknown short: {c}", .{unknown});
+                    try self.reporter.pushError("unknown flag: -{c}", .{unknown});
                 },
             }
         }
